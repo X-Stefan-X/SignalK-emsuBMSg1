@@ -113,4 +113,80 @@ function makeLine(body) {
   console.log('✓ Ungültige CRC korrekt abgewiesen');
 }
 
+// ─── BV2 Detail Sentence Tests ────────────────────────────────────────────────
+
+{
+  // BV2-Beispiel aus dem Protokolldokument:
+  // BV2,00,0000,08,8B85858585868587,93
+  // Feld 4: 8 Bytes → Spannungen: byte + 200 * 0.01
+  // 0x8B=139 → (139+200)*0.01 = 3.39V
+  // 0x85=133 → (133+200)*0.01 = 3.33V usw.
+
+  // Parser braucht bekannte Zellanzahl — simuliere vorherigen BV1
+  const bv1Line = makeLine('BV1,0008,4A,94,80,335B,');
+  parser.parse(bv1Line);  // setzt _knownCellCount = 8
+
+  // Eine einzelne BV2-Gruppe mit 8 Zellen → sofort flush
+  const line = makeLine('BV2,00,0000,08,8B85858585868587');
+  const deltas = parser.parse(line);
+  assert.ok(deltas.length > 0, 'BV2 soll Delta liefern wenn alle Zellen empfangen');
+  const vals = deltas[0].updates[0].values;
+  assert.strictEqual(vals.length, 8, 'BV2: 8 Einzelzell-Pfade erwartet');
+  assert.ok(vals[0].path.endsWith('cells.0.voltage'), 'BV2: Pfad cells.0.voltage');
+  assert.strictEqual(
+    Math.round(vals[0].value * 100) / 100,
+    (0x8B + 200) * 0.01,
+    `BV2: Zelle 0 Spannung erwartet ${(0x8B + 200) * 0.01}V`
+  );
+  console.log('✓ BV2 Einzelzell-Spannungen korrekt dekodiert');
+}
+
+{
+  // BT2 Detail: byte − 100 → °C → + 273.15 → K
+  // 0x78 = 120 → 120 - 100 = 20°C → 293.15K
+  const bv1Line = makeLine('BV1,0008,4A,94,80,335B,');
+  parser.parse(bv1Line);
+
+  const line = makeLine('BT2,00,0000,08,7878787878787878');
+  const deltas = parser.parse(line);
+  assert.ok(deltas.length > 0, 'BT2 soll Delta liefern');
+  const vals = deltas[0].updates[0].values;
+  assert.ok(vals[0].path.endsWith('cells.0.moduleTemperature'), 'BT2: Pfad moduleTemperature');
+  assert.strictEqual(vals[0].value, (0x78 - 100) + 273.15, 'BT2: Kelvin korrekt');
+  console.log('✓ BT2 Modul-Temperaturen korrekt dekodiert');
+}
+
+{
+  // BB2 Detail: byte × 100/255 → %
+  // 0x00 → 0%
+  const bv1Line = makeLine('BV1,0008,4A,94,80,335B,');
+  parser.parse(bv1Line);
+
+  const line = makeLine('BB2,00,0000,08,0000000000000000');
+  const deltas = parser.parse(line);
+  assert.ok(deltas.length > 0, 'BB2 soll Delta liefern');
+  const vals = deltas[0].updates[0].values;
+  assert.ok(vals[0].path.endsWith('cells.0.balancingRate'), 'BB2: Pfad balancingRate');
+  assert.strictEqual(vals[0].value, 0, 'BB2: 0% Balancing');
+  console.log('✓ BB2 Balancing-Raten korrekt dekodiert');
+}
+
+{
+  // Multi-Chunk: 16 Zellen in zwei BV2-Gruppen à 8
+  // Parser soll erst nach zweiter Gruppe flushen
+  const bv1Line = makeLine('BV1,0010,4A,94,80,335B,');
+  parser.parse(bv1Line);  // 16 Zellen bekannt
+
+  const line1 = makeLine('BV2,00,0000,08,8585858585858585');
+  const line2 = makeLine('BV2,00,0008,08,8686868686868686');
+
+  const d1 = parser.parse(line1);
+  assert.strictEqual(d1.length, 0, 'BV2 Chunk 1: noch kein Delta (16 Zellen, erst 8 empfangen)');
+
+  const d2 = parser.parse(line2);
+  assert.ok(d2.length > 0, 'BV2 Chunk 2: Delta nach vollständigem Empfang');
+  assert.strictEqual(d2[0].updates[0].values.length, 16, 'BV2 Multi-Chunk: 16 Zellen im Delta');
+  console.log('✓ BV2 Multi-Chunk (16 Zellen in 2 Gruppen) korrekt zusammengesetzt');
+}
+
 console.log('\n✅ Alle Tests bestanden!');

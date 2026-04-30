@@ -1,9 +1,10 @@
 # SignalK Plugin: EMUS G1 BMS via BLE (SCM031B)
 
 **Plugin ID:** `signalk-emus-bms-g1`  
-**Version:** 2.0.0  
+**Version:** 2.1.0  
 **Modul:** EMUS G1 Smartphone Connectivity Module SCM031B  
 **Protokoll:** Bluetooth 4.0 LE · Nordic UART Service (NUS) · EMUS Serial Protocol v2.1.4
+**Sentences:** ST1, CV1, BV1, **BV2**, BC1, BT1, **BT2**, **BT3**, **BT4**, BB1, **BB2**, CS1
 
 ---
 
@@ -244,6 +245,16 @@ Offset +200, Multiplikator 0.01 → V
 
 ---
 
+### BV2 – Zellspannungs-Detail *(Einzelzellen)*
+
+Liefert die Spannung jeder einzelnen Zelle. Das BMS antwortet mit mehreren
+Sentences à max. 8 Zellen — der Parser sammelt alle Chunks und gibt erst
+ein kombiniertes Delta aus, wenn alle Zellen empfangen wurden.
+
+Kodierung: `byte + 200 × 0.01 → V`
+
+---
+
 ### BC1 – Ladezustand
 
 | Feld | Format | Einheit |
@@ -254,9 +265,31 @@ Offset +200, Multiplikator 0.01 → V
 
 ---
 
-### BT1 – Zellmodul-Temperaturen
+### BT1 – Zellmodul-Temperaturen (Zusammenfassung)
 
 Signed HexDec → °C, Plugin konvertiert nach Kelvin (SignalK-Standard).
+
+---
+
+### BT2 – Zellmodul-Temperaturen Detail *(Einzelmodule)*
+
+Interne Temperatursensoren auf jedem Zellmodul, Einzelwerte pro Zelle.
+
+Kodierung: `byte − 100 → °C → + 273.15 → K`
+
+---
+
+### BT3 – Zelltemperaturen Zusammenfassung *(externe Sensoren)*
+
+Zusammenfassung der optionalen externen Temperatursensoren direkt an den Zellen.
+
+---
+
+### BT4 – Zelltemperaturen Detail *(externe Sensoren, Einzelzellen)*
+
+Einzelwerte der optionalen externen Temperatursensoren pro Zelle.
+
+Kodierung: `byte − 100 → °C → + 273.15 → K`
 
 ---
 
@@ -266,9 +299,17 @@ Soll- und Ist-Spannung/-Strom des angeschlossenen Ladegeräts.
 
 ---
 
-### BB1 – Balancing-Rate
+### BB1 – Balancing-Rate (Zusammenfassung)
 
 Maximale und durchschnittliche Balancing-Rate (0–100%).
+
+---
+
+### BB2 – Balancing-Rate Detail *(Einzelzellen)*
+
+Balancing-Rate jeder einzelnen Zelle.
+
+Kodierung: `byte × 100/255 → %`
 
 ---
 
@@ -348,7 +389,7 @@ signalk-emus-bms-g1/
 | **Linux-Berechtigungen** | node benötigt `CAP_NET_RAW` für BLE-Zugriff. `sudo setcap cap_net_raw+eip $(which node)` |
 | **BLE MTU** | Standard-MTU 20 Bytes/Chunk. Aktivierung BLE Data Length Extension (DLE) auf dem Host verbessert Durchsatz. |
 | **Kein iOS** | EMUS App unterstützt iOS, dieses Plugin läuft nur auf dem Server-Host (Linux/macOS/Windows). |
-| **BV2/BT2 fehlen** | Einzel-Zellspannungen und -temperaturen (Detail-Sentences) sind in v2.0 nicht implementiert. |
+| **BT4 optional** | BT4 liefert Daten nur wenn externe Temperatursensoren an den Zellmodulen verbaut sind. |
 | **Kein Schreibzugriff** | Konfigurationsparameter (CF2) werden nicht geschrieben — das Plugin ist read-only. |
 | **Raspberry Pi 3** | Integrierter BT-Chip (BCM43438) unterstützt BT 4.1 LE — funktioniert. Pi 4/5 ebenfalls. |
 

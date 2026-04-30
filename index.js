@@ -97,14 +97,24 @@ module.exports = function (app) {
 
     connection.on('open', () => {
       app.debug('BLE-Verbindung offen, initiale Daten anfordern…');
-      // Initialen Datensatz anfordern
+      // Summary sentences sofort anfordern
       connection.send('ST1,?');
       connection.send('CV1,?');
       connection.send('BV1,?');
       connection.send('BC1,?');
       connection.send('BT1,?');
+      connection.send('BT3,?');
       connection.send('CS1,?');
       connection.send('BB1,?');
+      // Detail sentences (Einzelzellen) — 1s verzögert damit BMS nicht überflutet wird
+      setTimeout(() => {
+        if (connection.isOpen()) {
+          connection.send('BV2,?');
+          connection.send('BT2,?');
+          connection.send('BT4,?');
+          connection.send('BB2,?');
+        }
+      }, 1000);
     });
 
     connection.on('close', () => {
@@ -117,11 +127,26 @@ module.exports = function (app) {
     if (opts.pollIntervalMs > 0) {
       const pollTimer = setInterval(() => {
         if (connection.isOpen()) {
+          // Summary sentences bei jedem Poll
           connection.send('ST1,?');
           connection.send('CV1,?');
           connection.send('BV1,?');
           connection.send('BC1,?');
           connection.send('BT1,?');
+          connection.send('BT3,?');
+          // Detail sentences (Einzelzellen) etwas seltener — jede zweite Runde
+          if (!pollTimer._detailTick) pollTimer._detailTick = 0;
+          pollTimer._detailTick++;
+          if (pollTimer._detailTick % 2 === 0) {
+            setTimeout(() => {
+              if (connection.isOpen()) {
+                connection.send('BV2,?');
+                connection.send('BT2,?');
+                connection.send('BT4,?');
+                connection.send('BB2,?');
+              }
+            }, 200);
+          }
         }
       }, opts.pollIntervalMs);
 
