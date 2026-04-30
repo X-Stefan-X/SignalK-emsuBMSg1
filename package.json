@@ -1,0 +1,26 @@
+{
+  "name": "signalk-emus-bms-g1",
+  "version": "2.0.0",
+  "description": "SignalK plugin für EMUS G1 BMS via BLE Smartphone Connectivity Module SCM031B (Nordic UART Service)",
+  "main": "index.js",
+  "keywords": [
+    "signalk",
+    "signalk-node-server-plugin",
+    "battery",
+    "bms",
+    "emus",
+    "bluetooth",
+    "ble",
+    "nordic-uart",
+    "scm031b"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@abandonware/noble": "^1.9.2-15"
+  },
+  "signalk-plugin-enabled-by-default": false,
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
