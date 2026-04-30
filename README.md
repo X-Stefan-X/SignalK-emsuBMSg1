@@ -15,12 +15,13 @@
 3. [Voraussetzungen](#voraussetzungen)
 4. [BLE-Einrichtung auf dem SignalK-Host](#ble-einrichtung-auf-dem-signalk-host)
 5. [Installation](#installation)
-6. [Konfiguration](#konfiguration)
-7. [Unterstützte Sentences](#unterstützte-sentences)
-8. [SignalK-Datenpfade](#signalk-datenpfade)
-9. [CRC-Prüfung](#crc-prüfung)
-10. [Dateistruktur](#dateistruktur)
-11. [Bekannte Einschränkungen](#bekannte-einschränkungen)
+6. [Update](#update)
+7. [Konfiguration](#konfiguration)
+8. [Unterstützte Sentences](#unterstützte-sentences)
+9. [SignalK-Datenpfade](#signalk-datenpfade)
+10. [CRC-Prüfung](#crc-prüfung)
+11. [Dateistruktur](#dateistruktur)
+12. [Bekannte Einschränkungen](#bekannte-einschränkungen)
 
 ---
 
@@ -181,6 +182,67 @@ sudo systemctl restart signalk
 
 ---
 
+## Update
+
+### Plugin-Code aktualisieren
+
+```bash
+cd ~/.signalk/node_modules/signalk-emus-bms-g1
+
+# Aktuelle Version prüfen
+git log --oneline -5
+
+# Neueste Version holen
+git pull origin main
+
+# Abhängigkeiten aktualisieren (falls package.json geändert)
+npm install
+
+# SignalK-Server neu starten
+sudo systemctl restart signalk
+```
+
+### Version prüfen
+
+```bash
+# Installierte Version anzeigen
+cat ~/.signalk/node_modules/signalk-emus-bms-g1/package.json | grep version
+
+# Letzte Commits anzeigen
+git -C ~/.signalk/node_modules/signalk-emus-bms-g1 log --oneline -10
+```
+
+### Rollback auf vorherige Version
+
+```bash
+cd ~/.signalk/node_modules/signalk-emus-bms-g1
+
+# Verfügbare Versionen/Tags anzeigen
+git tag
+
+# Auf bestimmten Stand zurückgehen (z.B. v2.0.0)
+git checkout v2.0.0
+
+# Oder auf letzten stabilen Commit
+git log --oneline -10
+git checkout <commit-hash>
+
+# Neustart
+sudo systemctl restart signalk
+```
+
+### Nach dem Update: Tests ausführen
+
+```bash
+cd ~/.signalk/node_modules/signalk-emus-bms-g1
+node test.js
+```
+
+Alle Tests sollten mit `✅ Alle Tests bestanden!` abschließen, bevor der Server
+neu gestartet wird.
+
+---
+
 ## Konfiguration
 
 Im SignalK-Admin-Panel unter **Server → Plugin Config → EMUS BMS G1 (BLE SCM031B)**:
@@ -189,19 +251,38 @@ Im SignalK-Admin-Panel unter **Server → Plugin Config → EMUS BMS G1 (BLE SCM
 |---|---|---|
 | `deviceAddress` | `''` | BLE MAC-Adresse des SCM031B (z.B. `AA:BB:CC:DD:EE:FF`). **Empfohlen** für stabile Verbindung. |
 | `deviceName` | `''` | Alternativer Matching per BLE-Name (z.B. `EMUS BMS`). Nur wenn keine MAC gesetzt. |
-| `pollIntervalMs` | `2000` | Polling-Intervall in ms (0 = nur BMS-Broadcasts) |
 | `instanceName` | `house` | Battery-Instanzname im SignalK-Pfad |
-| `verbose` | `false` | Ausführliche Debug-Ausgabe |
+| `pollIntervalMs` | `2000` | **Summary-Intervall** in ms: Spannung, Strom, SoC, Temperaturen (ST1, CV1, BV1, BC1, BT1, BT3, CS1, BB1). `0` = deaktiviert. |
+| `detailPollIntervalMs` | `10000` | **Einzelzell-Intervall** in ms: Zellspannungen, Zelltemperaturen, Balancing (BV2, BT2, BT4, BB2). Bei 48 Zellen löst jede Anfrage 6 BLE-Sentences aus — Wert nicht zu klein wählen. `0` = deaktiviert. |
+| `verbose` | `false` | Ausführliche Debug-Ausgabe im SignalK-Log |
 
-**Empfohlene Konfiguration:**
+### Empfohlene Werte für 48 Zellen (2 × 24)
+
 ```json
 {
   "deviceAddress": "AA:BB:CC:DD:EE:FF",
-  "pollIntervalMs": 2000,
   "instanceName": "house",
+  "pollIntervalMs": 2000,
+  "detailPollIntervalMs": 10000,
   "verbose": false
 }
 ```
+
+**Erklärung der Standardwerte:**
+
+| Intervall | Wert | Begründung |
+|---|---|---|
+| Summary | 2 s | Spannung/Strom ändern sich schnell — kurzes Intervall sinnvoll |
+| Einzelzellen | 10 s | 48 Zellen = 6 BV2 + 6 BT2 + 6 BT4 + 6 BB2 = bis zu 24 BLE-Sentences pro Abruf. Längeres Intervall schont den BLE-Kanal und reicht für Monitoring völlig aus. |
+
+**Richtwerte je nach Anwendungsfall:**
+
+| Anwendung | `pollIntervalMs` | `detailPollIntervalMs` |
+|---|---|---|
+| Normalbetrieb | 2000 | 10000 |
+| Aktives Laden überwachen | 1000 | 5000 |
+| Stromsparend / Ankerliegen | 5000 | 30000 |
+| Einzelzellen deaktivieren | 2000 | 0 |
 
 **Automatisches Gerätematching (ohne MAC):**
 
