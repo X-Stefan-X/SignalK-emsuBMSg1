@@ -63,6 +63,17 @@ module.exports = function (app) {
         minimum: 0
       },
 
+      // ── Schalter ───────────────────────────────────────────────────────────
+      enabledByDefault: {
+        type: 'boolean',
+        title: 'Standard: BMS aktiv',
+        description:
+          'Startzustand beim Plugin-Start. ' +
+          'Kann danach über den SignalK-Pfad electrical.batteries.<instanz>.bms.enabled ' +
+          'jederzeit umgeschaltet werden.',
+        default: true
+      },
+
       verbose: {
         type: 'boolean',
         title: 'Verbose Logging',
@@ -79,18 +90,26 @@ module.exports = function (app) {
         instanceName:         'house',
         pollIntervalMs:       2000,
         detailPollIntervalMs: 10000,
+        enabledByDefault:     true,
         verbose:              false
       },
       options
     );
 
+    // ── Schalter-Zustand ───────────────────────────────────────────────────
+    // Pfad: electrical.batteries.<instanz>.bms.enabled  (bool)
+    const enabledPath = `electrical.batteries.${opts.instanceName}.bms.enabled`;
+    let   isEnabled   = opts.enabledByDefault;
+
     app.debug(
       `EMUS BMS G1 Plugin startet. ` +
       `Gerät: ${opts.deviceAddress || opts.deviceName || '(automatisch)'}, ` +
       `Summary: ${opts.pollIntervalMs}ms, ` +
-      `Einzelzellen: ${opts.detailPollIntervalMs > 0 ? opts.detailPollIntervalMs + 'ms' : 'deaktiviert'}`
+      `Einzelzellen: ${opts.detailPollIntervalMs > 0 ? opts.detailPollIntervalMs + 'ms' : 'deaktiviert'}, ` +
+      `Startzustand: ${isEnabled ? 'aktiv' : 'inaktiv'}`
     );
 
+    // ── Parser & Verbindung ────────────────────────────────────────────────
     const parser = new EmusBmsParser(
       opts.instanceName,
       opts.verbose ? (msg) => app.debug(msg) : null
@@ -115,11 +134,7 @@ module.exports = function (app) {
 
     connection.on('open', () => {
       app.debug('BLE-Verbindung offen, initiale Daten anfordern…');
-
-      // Summary-Sentences sofort beim Verbindungsaufbau
       _pollSummary();
-
-      // Einzelzell-Sentences 1s verzögert (BMS nicht sofort überlasten)
       if (opts.detailPollIntervalMs > 0) {
         setTimeout(() => { if (connection.isOpen()) _pollDetail(); }, 1000);
       }
@@ -129,12 +144,50 @@ module.exports = function (app) {
       app.debug('BLE-Verbindung geschlossen');
     });
 
-    connection.open();
+    // ── Initialen Schalter-Zustand in SignalK publizieren ──────────────────
+    _publishEnabled(isEnabled);
+
+    // ── PUT-Handler: Schalter-Pfad beschreibbar machen ────────────────────
+    // Andere Plugins, Dashboards (Freeboard, KIP) oder Node-RED können so
+    // electrical.batteries.house.bms.enabled auf true/false setzen.
+    app.registerPutHandler(
+      'vessels.self',
+      enabledPath,
+      (context, path, value, callback) => {
+        const newState = Boolean(value);
+        if (newState === isEnabled) {
+          callback({ state: 'COMPLETED', statusCode: 200 });
+          return;
+        }
+
+        app.debug(`BMS enabled → ${newState}`);
+        isEnabled = newState;
+        _publishEnabled(isEnabled);
+
+        if (isEnabled) {
+          // Einschalten: BLE-Verbindung aufbauen
+          app.debug('BMS aktiviert — verbinde BLE…');
+          connection.open();
+        } else {
+          // Ausschalten: BLE-Verbindung trennen (spart Strom, BLE-Slot frei)
+          app.debug('BMS deaktiviert — trenne BLE…');
+          connection.close();
+        }
+
+        callback({ state: 'COMPLETED', statusCode: 200 });
+      },
+      plugin.id
+    );
+
+    // ── Verbindung starten (wenn initial aktiv) ────────────────────────────
+    if (isEnabled) {
+      connection.open();
+    }
 
     // ── Summary-Polling Timer ──────────────────────────────────────────────
     if (opts.pollIntervalMs > 0) {
       const summaryTimer = setInterval(() => {
-        if (connection.isOpen()) _pollSummary();
+        if (isEnabled && connection.isOpen()) _pollSummary();
       }, opts.pollIntervalMs);
       unsubscribes.push(() => clearInterval(summaryTimer));
     }
@@ -142,7 +195,7 @@ module.exports = function (app) {
     // ── Einzelzell-Polling Timer ───────────────────────────────────────────
     if (opts.detailPollIntervalMs > 0) {
       const detailTimer = setInterval(() => {
-        if (connection.isOpen()) _pollDetail();
+        if (isEnabled && connection.isOpen()) _pollDetail();
       }, opts.detailPollIntervalMs);
       unsubscribes.push(() => clearInterval(detailTimer));
     }
@@ -160,12 +213,21 @@ module.exports = function (app) {
     }
 
     function _pollDetail() {
-      // 200ms Abstand zwischen den Detail-Anfragen damit das BMS
-      // die 6× BV2-Chunks (48 Zellen) fertig senden kann bevor BT2 kommt
       connection.send('BV2,?');
       setTimeout(() => { if (connection.isOpen()) connection.send('BT2,?'); },  400);
       setTimeout(() => { if (connection.isOpen()) connection.send('BT4,?'); },  800);
       setTimeout(() => { if (connection.isOpen()) connection.send('BB2,?'); }, 1200);
+    }
+
+    function _publishEnabled(state) {
+      app.handleMessage(plugin.id, {
+        context: 'vessels.self',
+        updates: [{
+          source:    { label: plugin.id, type: 'plugin' },
+          timestamp: new Date().toISOString(),
+          values: [{ path: enabledPath, value: state }]
+        }]
+      });
     }
   };
 

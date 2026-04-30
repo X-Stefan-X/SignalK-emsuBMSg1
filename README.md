@@ -17,11 +17,12 @@
 5. [Installation](#installation)
 6. [Update](#update)
 7. [Konfiguration](#konfiguration)
-8. [Unterstützte Sentences](#unterstützte-sentences)
-9. [SignalK-Datenpfade](#signalk-datenpfade)
-10. [CRC-Prüfung](#crc-prüfung)
-11. [Dateistruktur](#dateistruktur)
-12. [Bekannte Einschränkungen](#bekannte-einschränkungen)
+8. [BMS-Schalter](#bms-schalter-aktivierung-per-datenpfad)
+9. [Unterstützte Sentences](#unterstützte-sentences)
+10. [SignalK-Datenpfade](#signalk-datenpfade)
+11. [CRC-Prüfung](#crc-prüfung)
+12. [Dateistruktur](#dateistruktur)
+13. [Bekannte Einschränkungen](#bekannte-einschränkungen)
 
 ---
 
@@ -254,6 +255,7 @@ Im SignalK-Admin-Panel unter **Server → Plugin Config → EMUS BMS G1 (BLE SCM
 | `instanceName` | `house` | Battery-Instanzname im SignalK-Pfad |
 | `pollIntervalMs` | `2000` | **Summary-Intervall** in ms: Spannung, Strom, SoC, Temperaturen (ST1, CV1, BV1, BC1, BT1, BT3, CS1, BB1). `0` = deaktiviert. |
 | `detailPollIntervalMs` | `10000` | **Einzelzell-Intervall** in ms: Zellspannungen, Zelltemperaturen, Balancing (BV2, BT2, BT4, BB2). Bei 48 Zellen löst jede Anfrage 6 BLE-Sentences aus — Wert nicht zu klein wählen. `0` = deaktiviert. |
+| `enabledByDefault` | `true` | Startzustand beim Plugin-Start. Kann danach per Datenpfad umgeschaltet werden. |
 | `verbose` | `false` | Ausführliche Debug-Ausgabe im SignalK-Log |
 
 ### Empfohlene Werte für 48 Zellen (2 × 24)
@@ -264,6 +266,7 @@ Im SignalK-Admin-Panel unter **Server → Plugin Config → EMUS BMS G1 (BLE SCM
   "instanceName": "house",
   "pollIntervalMs": 2000,
   "detailPollIntervalMs": 10000,
+  "enabledByDefault": true,
   "verbose": false
 }
 ```
@@ -291,6 +294,65 @@ Name mit `emus`, `BMS` oder `scm` beginnt. Das ist praktisch für die Ersteinric
 aber für den produktiven Betrieb sollte die MAC-Adresse konfiguriert werden.
 
 ---
+
+---
+
+## BMS-Schalter (Aktivierung per Datenpfad)
+
+### Konzept
+
+Das BMS ist auf deinem Boot nicht dauerhaft aktiv — nur beim Laden und beim
+Motorbetrieb. Das Plugin bietet daher einen **beschreibbaren SignalK-Pfad**
+als Ein-/Ausschalter:
+
+```
+electrical.batteries.house.bms.enabled   →  true / false
+```
+
+Wenn `false` gesetzt wird:
+- BLE-Verbindung wird **getrennt** (spart Strom, gibt BLE-Slot frei)
+- Polling-Timer laufen weiter, senden aber nichts
+- Der Wert `false` bleibt im SignalK-Datenstrom sichtbar
+
+Wenn `true` gesetzt wird:
+- BLE-Verbindung wird **neu aufgebaut**
+- Normaler Betrieb startet automatisch
+
+### Schalter setzen
+
+**Per SignalK REST-API** (z.B. aus einem anderen Plugin oder Node-RED):
+```bash
+# Einschalten
+curl -X PUT http://localhost:3000/signalk/v1/api/vessels/self/electrical/batteries/house/bms/enabled \
+  -H "Content-Type: application/json" -d '{"value": true}'
+
+# Ausschalten
+curl -X PUT http://localhost:3000/signalk/v1/api/vessels/self/electrical/batteries/house/bms/enabled \
+  -H "Content-Type: application/json" -d '{"value": false}'
+```
+
+**Per Dashboard** (Freeboard, KIP, Wilhelm SK):
+Einen Button/Toggle auf den Pfad `electrical.batteries.house.bms.enabled` legen.
+KIP und Wilhelm SK unterstützen PUT-fähige Toggle-Widgets direkt.
+
+**Per Node-RED** (für spätere Automatisierung):
+```
+[inject true] → [SignalK out: PUT electrical.batteries.house.bms.enabled]
+[inject false] → [SignalK out: PUT electrical.batteries.house.bms.enabled]
+```
+
+### Startzustand
+
+Der Parameter `enabledByDefault` in der Plugin-Config bestimmt den Zustand
+beim SignalK-Start:
+
+| `enabledByDefault` | Verhalten beim Start |
+|---|---|
+| `true` (Standard) | Plugin verbindet sofort beim Start |
+| `false` | Plugin startet inaktiv — muss manuell oder per Automatisierung aktiviert werden |
+
+---
+
 
 ## Unterstützte Sentences
 
@@ -400,6 +462,7 @@ Alle Pfade unter `electrical.batteries.<instance>.*` (Standard: `house`):
 
 | Pfad | Einheit | Quelle |
 |---|---|---|
+| `.bms.enabled` | bool | Schalter (PUT-fähig) |
 | `.voltage` | V | CV1 / BV1 |
 | `.current` | A | CV1 |
 | `.power` | W | berechnet |
